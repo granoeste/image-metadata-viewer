@@ -1,0 +1,62 @@
+{
+  "name": "image-metadata-viewer",
+  "displayName": "Image Metadata Viewer",
+  "description": "View Stable Diffusion / ComfyUI metadata (PNG) and EXIF data (JPEG) for image files",
+  "version": "1.0.0",
+  "publisher": "granoeste",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/granoeste/image-metadata-viewer.git"
+  },
+  "license": "MIT",
+  "keywords": [
+    "stable diffusion",
+    "comfyui",
+    "exif",
+    "metadata",
+    "image"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "imageMetadata.show",
+        "title": "Show Image Metadata"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "imageMetadata.show",
+          "when": "resourceExtname == .png || resourceExtname == .jpg || resourceExtname == .jpeg",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "imageMetadata.show",
+          "when": "resourceExtname == .png || resourceExtname == .jpg || resourceExtname == .jpeg",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npx @vscode/vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}
