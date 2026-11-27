@@ -6,6 +6,7 @@ A Visual Studio Code extension that displays image metadata — Stable Diffusion
 
 - **Stable Diffusion metadata** display (A1111 format) from PNG files
 - **ComfyUI node graph** metadata display from PNG files
+- **ComfyUI workflow export** — save the workflow (UI format) or API prompt as JSON, and inspect every node in the graph
 - **EXIF data** display with categorized view from JPEG files
 - **Thumbnail preview** in the metadata panel
 - **Copy buttons** for prompts, settings rows, and raw data

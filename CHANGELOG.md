@@ -5,6 +5,17 @@ All notable changes to the Image Metadata Viewer extension will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- ComfyUI workflow export: save the UI-format `workflow` or API-format `prompt` as JSON (panel buttons / `Export ComfyUI Workflow` command in Explorer context menu)
+- ComfyUI node graph analysis: "Workflow Nodes" section listing every node in dependency order with its parameters and input links
+
+### Fixed
+
+- Large ComfyUI `workflow` chunks beyond the first 64KB were dropped when the `prompt` chunk fit within it
+
 ## [1.0.0] - 2026-03-18
 
 ### Added

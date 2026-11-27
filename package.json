@@ -30,6 +30,10 @@
       {
         "command": "imageMetadata.show",
         "title": "Show Image Metadata"
+      },
+      {
+        "command": "imageMetadata.exportComfyUIWorkflow",
+        "title": "Export ComfyUI Workflow"
       }
     ],
     "menus": {
@@ -38,6 +42,11 @@
           "command": "imageMetadata.show",
           "when": "resourceExtname == .png || resourceExtname == .jpg || resourceExtname == .jpeg",
           "group": "navigation"
+        },
+        {
+          "command": "imageMetadata.exportComfyUIWorkflow",
+          "when": "resourceExtname == .png",
+          "group": "navigation"
         }
       ],
       "editor/title": [
@@ -45,6 +54,12 @@
           "command": "imageMetadata.show",
           "when": "resourceExtname == .png || resourceExtname == .jpg || resourceExtname == .jpeg",
           "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "imageMetadata.exportComfyUIWorkflow",
+          "when": "resourceExtname == .png"
         }
       ]
     }

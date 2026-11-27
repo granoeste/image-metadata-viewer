@@ -56,6 +56,7 @@ npm run package    # .vsix 生成 (npx @vscode/vsce package --no-dependencies)
 | Command ID | Description | Trigger |
 |------------|-------------|---------|
 | `imageMetadata.show` | メタデータパネル表示 | Explorer右クリック / エディタタイトルボタン |
+| `imageMetadata.exportComfyUIWorkflow` | ComfyUI workflow / API prompt を JSON エクスポート | Explorer右クリック (PNG) / コマンドパレット / パネルのボタン |
 
 ## 表示内容
 
@@ -72,6 +73,8 @@ npm run package    # .vsix 生成 (npx @vscode/vsce package --no-dependencies)
 - **ComfyUI** バッジ
 - Positive / Negative Prompt
 - Generation Settings テーブル
+- Export ボタン（Workflow = UI 形式 `.workflow.json` / API Prompt = `.api.json`）
+- Workflow Nodes（全ノードを依存順に表示: パラメータ + 入力リンク）
 - Raw Prompt JSON / Raw Workflow JSON（折りたたみ）
 
 ### EXIF
@@ -91,7 +94,7 @@ npm run package    # .vsix 生成 (npx @vscode/vsce package --no-dependencies)
 
 - `webviewContent.ts` に SD / EXIF / ComfyUI / No metadata の4種類の HTML 生成関数
 - タブ切り替え時の自動更新は `onDidChangeTabGroups` + `onDidChangeActiveTextEditor` の両方でリスン
-- ファイル先頭 64KB のみ読み取り（メタデータは IDAT/SOS の前に格納されるため）
+- ファイル先頭 64KB を読み取り、IDAT に到達しなければ最大 8MB まで再読み取り（大きな ComfyUI workflow 対策）
 - サムネイルプレビューは `webview.asWebviewUri()` で安全に表示
 - VS Code テーマ変数 (`var(--vscode-*)`) でテーマ統合
 

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { SDMetadata } from "./metadataParser";
-import { ComfyUIMetadata } from "./comfyuiParser";
+import { ComfyUIMetadata, ComfyUINodeInfo } from "./comfyuiParser";
 import { ExifData } from "./exifReader";
 
 function getNonce(): string {
@@ -123,6 +123,20 @@ ${commonStyles()}
   <img class="thumbnail" src="${imageWebviewUri}" alt="Preview" />
   <span class="badge comfyui">ComfyUI</span>
 
+  <div class="export-bar">
+    ${
+      metadata.rawWorkflow
+        ? `<button class="export-btn" data-export="workflow" title="ComfyUI にドラッグ＆ドロップで読み込める UI 形式の workflow JSON を保存">Export Workflow (.json)</button>`
+        : ""
+    }
+    <button class="export-btn${metadata.rawWorkflow ? " secondary" : ""}" data-export="api" title="ComfyUI API 形式 (prompt) の JSON を保存。ComfyUI に読み込み、または /prompt API で実行可能">Export API Prompt (.json)</button>
+  </div>
+  ${
+    metadata.rawWorkflow
+      ? ""
+      : `<div class="note">この画像には UI 形式の workflow が含まれていません。API 形式の prompt をエクスポートできます（ComfyUI にドラッグ＆ドロップで読み込み可能）。</div>`
+  }
+
   <div class="section-header">
     <h2>Positive Prompt</h2>
     <button class="copy-btn" data-copy-id="positive">Copy</button>
@@ -151,6 +165,8 @@ ${commonStyles()}
   `
       : ""
   }
+
+  ${renderComfyUINodes(metadata.nodes)}
 
   <details>
     <summary>Raw Prompt (JSON)</summary>
@@ -311,6 +327,45 @@ export function getNoMetadataHtml(): string {
 </html>`;
 }
 
+/**
+ * ComfyUI ノードグラフ解析結果を HTML 化。
+ */
+function renderComfyUINodes(nodes: ComfyUINodeInfo[]): string {
+  if (nodes.length === 0) {
+    return "";
+  }
+  const linkCount = nodes.reduce((n, node) => n + node.links.length, 0);
+
+  const items = nodes
+    .map((node) => {
+      const params = node.params
+        .map(
+          ([k, v]) =>
+            `<tr><td class="key">${escapeHtml(k)}</td><td class="value">${escapeHtml(v)}</td><td class="copy-cell"><button class="copy-row-btn" data-copy="${escapeHtml(v)}" title="Copy ${escapeHtml(k)}">Copy</button></td></tr>`,
+        )
+        .join("");
+      const links = node.links
+        .map(
+          (l) =>
+            `<tr><td class="key">${escapeHtml(l.input)}</td><td class="value link" colspan="2">← <a href="#node-${escapeHtml(l.fromId)}">#${escapeHtml(l.fromId)} ${escapeHtml(l.fromClassType)}</a> <span class="slot">[${l.fromSlot}]</span></td></tr>`,
+        )
+        .join("");
+      const title = node.title
+        ? ` <span class="node-title">${escapeHtml(node.title)}</span>`
+        : "";
+      return `<div class="node" id="node-${escapeHtml(node.id)}">
+      <div class="node-header"><span class="node-id">#${escapeHtml(node.id)}</span> <span class="node-class">${escapeHtml(node.classType)}</span>${title}</div>
+      ${params || links ? `<table>${params}${links}</table>` : ""}
+    </div>`;
+    })
+    .join("\n");
+
+  return `<details class="nodes"${nodes.length <= 40 ? " open" : ""}>
+    <summary>Workflow Nodes (${nodes.length} nodes, ${linkCount} links)</summary>
+    <div class="nodes-list">${items}</div>
+  </details>`;
+}
+
 function formatExifLabel(key: string): string {
   const labels: Record<string, string> = {
     Make: "Make",
@@ -366,6 +421,12 @@ function copyScript(nonce: string): string {
     document.querySelectorAll('[data-copy]').forEach(btn => {
       btn.addEventListener('click', () => {
         vscode.postMessage({ type: 'copy', text: btn.dataset.copy });
+      });
+    });
+    // Export (ComfyUI workflow / API prompt)
+    document.querySelectorAll('[data-export]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        vscode.postMessage({ type: 'export', kind: btn.dataset.export });
       });
     });
   </script>`;
@@ -500,6 +561,74 @@ function commonStyles(): string {
   }
   details {
     margin: 8px 0;
+  }
+  .export-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0 0 8px;
+  }
+  .export-btn {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    border-radius: 2px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 0.85em;
+  }
+  .export-btn:hover {
+    background: var(--vscode-button-hoverBackground);
+  }
+  .export-btn.secondary {
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+  }
+  .export-btn.secondary:hover {
+    background: var(--vscode-button-secondaryHoverBackground);
+  }
+  .note {
+    font-size: 0.85em;
+    opacity: 0.7;
+    margin-bottom: 8px;
+  }
+  .nodes-list {
+    margin-top: 6px;
+  }
+  .node {
+    border: 1px solid var(--vscode-widget-border);
+    border-radius: 3px;
+    margin: 6px 0;
+    padding: 4px 8px;
+  }
+  .node:target {
+    border-color: var(--vscode-focusBorder);
+  }
+  .node table {
+    margin: 4px 0 0;
+  }
+  .node-id {
+    font-family: var(--vscode-editor-font-family, monospace);
+    opacity: 0.6;
+  }
+  .node-class {
+    font-weight: bold;
+    color: var(--vscode-charts-orange, #ff9800);
+  }
+  .node-title {
+    opacity: 0.7;
+    font-style: italic;
+  }
+  td.link a {
+    color: var(--vscode-textLink-foreground);
+    text-decoration: none;
+  }
+  td.link a:hover {
+    text-decoration: underline;
+  }
+  .slot {
+    opacity: 0.5;
+    font-size: 0.85em;
   }
   summary {
     cursor: pointer;

@@ -8,6 +8,7 @@ English version: [README.md](README.md)
 
 - **Stable Diffusion メタデータ**表示（A1111 形式）— PNG ファイル対応
 - **ComfyUI ノードグラフ**メタデータ表示 — PNG ファイル対応
+- **ComfyUI ワークフローのエクスポート** — workflow (UI 形式) / API prompt を JSON 保存、全ノードの解析表示
 - **EXIF データ**のカテゴリ別表示 — JPEG ファイル対応
 - **サムネイルプレビュー**をメタデータパネル内に表示
 - **コピーボタン**でプロンプト・設定値・生データをワンクリックコピー

@@ -4,6 +4,26 @@ export interface ComfyUIMetadata {
   settings: Record<string, string>;
   rawPrompt: string;
   rawWorkflow: string;
+  /** ノードグラフ解析結果（依存順に並ぶ） */
+  nodes: ComfyUINodeInfo[];
+}
+
+/** ノードの入力リンク（他ノードの出力への参照） */
+export interface ComfyUINodeLink {
+  input: string;
+  fromId: string;
+  fromClassType: string;
+  fromSlot: number;
+}
+
+/** 解析済みノード情報 */
+export interface ComfyUINodeInfo {
+  id: string;
+  classType: string;
+  title?: string;
+  /** ウィジェット値（リンク以外の入力） */
+  params: [string, string][];
+  links: ComfyUINodeLink[];
 }
 
 interface ComfyUINode {
@@ -237,10 +257,98 @@ function extractSettings(prompt: ComfyUIPrompt): Record<string, string> {
   return settings;
 }
 
+function isLink(value: any): value is [string | number, number] {
+  return Array.isArray(value) && value.length === 2
+    && (typeof value[0] === 'string' || typeof value[0] === 'number')
+    && typeof value[1] === 'number';
+}
+
+function formatParamValue(value: any): string {
+  if (typeof value === 'string') { return value; }
+  if (value === null || value === undefined) { return String(value); }
+  if (typeof value === 'object') { return JSON.stringify(value); }
+  return String(value);
+}
+
+/**
+ * UI 形式 workflow からノードタイトルを取得（id → title）。
+ */
+function extractWorkflowTitles(rawWorkflow: string): Map<string, string> {
+  const titles = new Map<string, string>();
+  if (!rawWorkflow) { return titles; }
+  try {
+    const workflow = JSON.parse(rawWorkflow);
+    if (Array.isArray(workflow?.nodes)) {
+      for (const node of workflow.nodes) {
+        if (node && node.id !== undefined && typeof node.title === 'string') {
+          titles.set(String(node.id), node.title);
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return titles;
+}
+
+/**
+ * ノードグラフを解析し、依存関係順（入力元が先）に並べたノード一覧を返す。
+ */
+export function analyzeComfyUINodes(prompt: ComfyUIPrompt, rawWorkflow: string = ''): ComfyUINodeInfo[] {
+  const workflowTitles = extractWorkflowTitles(rawWorkflow);
+  const ids = Object.keys(prompt).filter(id => prompt[id] && typeof prompt[id] === 'object');
+
+  // トポロジカルソート (DFS)。ID 数値順で安定させる
+  const byNumericId = (a: string, b: string) => {
+    const na = Number(a), nb = Number(b);
+    return !isNaN(na) && !isNaN(nb) ? na - nb : a.localeCompare(b);
+  };
+  const ordered: string[] = [];
+  const state = new Map<string, 'visiting' | 'done'>();
+  const visit = (id: string) => {
+    if (state.has(id) || !prompt[id]) { return; }
+    state.set(id, 'visiting');
+    for (const value of Object.values(prompt[id].inputs || {})) {
+      if (isLink(value)) { visit(String(value[0])); }
+    }
+    state.set(id, 'done');
+    ordered.push(id);
+  };
+  [...ids].sort(byNumericId).forEach(visit);
+
+  return ordered.map(id => {
+    const node = prompt[id];
+    const params: [string, string][] = [];
+    const links: ComfyUINodeLink[] = [];
+    for (const [key, value] of Object.entries(node.inputs || {})) {
+      if (isLink(value)) {
+        const fromId = String(value[0]);
+        links.push({
+          input: key,
+          fromId,
+          fromClassType: prompt[fromId]?.class_type || '(missing)',
+          fromSlot: value[1],
+        });
+      } else {
+        params.push([key, formatParamValue(value)]);
+      }
+    }
+    const title = node._meta?.title || workflowTitles.get(id);
+    return {
+      id,
+      classType: String(node.class_type || '(unknown)'),
+      title: title && title !== node.class_type ? title : undefined,
+      params,
+      links,
+    };
+  });
+}
+
 export function parseComfyUIPrompt(rawPrompt: string, rawWorkflow: string = ''): ComfyUIMetadata {
   let prompt: ComfyUIPrompt;
   try {
     prompt = JSON.parse(rawPrompt);
+    if (!prompt || typeof prompt !== 'object' || Array.isArray(prompt)) { throw new Error('invalid'); }
   } catch {
     return {
       positivePrompt: '',
@@ -248,11 +356,13 @@ export function parseComfyUIPrompt(rawPrompt: string, rawWorkflow: string = ''):
       settings: {},
       rawPrompt,
       rawWorkflow,
+      nodes: [],
     };
   }
 
   const { positive, negative } = extractPrompts(prompt);
   const settings = extractSettings(prompt);
+  const nodes = analyzeComfyUINodes(prompt, rawWorkflow);
 
   return {
     positivePrompt: positive,
@@ -260,5 +370,6 @@ export function parseComfyUIPrompt(rawPrompt: string, rawWorkflow: string = ''):
     settings,
     rawPrompt,
     rawWorkflow,
+    nodes,
   };
 }

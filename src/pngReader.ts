@@ -3,6 +3,14 @@ import * as fs from 'fs';
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
 export function readPngTextChunks(buffer: Buffer): Map<string, string> {
+  return scanPngTextChunks(buffer).chunks;
+}
+
+/**
+ * tEXt チャンクを走査する。reachedImageData は IDAT/IEND まで到達できたか
+ * （false の場合、バッファ不足でメタデータが途中で切れている可能性がある）。
+ */
+function scanPngTextChunks(buffer: Buffer): { chunks: Map<string, string>; reachedImageData: boolean } {
   const result = new Map<string, string>();
 
   if (buffer.length < 8 || buffer.subarray(0, 8).compare(PNG_SIGNATURE) !== 0) {
@@ -16,7 +24,7 @@ export function readPngTextChunks(buffer: Buffer): Map<string, string> {
 
     // Stop at image data — metadata chunks come before IDAT
     if (type === 'IDAT' || type === 'IEND') {
-      break;
+      return { chunks: result, reachedImageData: true };
     }
 
     if (type === 'tEXt' && offset + 8 + length <= buffer.length) {
@@ -33,7 +41,7 @@ export function readPngTextChunks(buffer: Buffer): Map<string, string> {
     offset += 12 + length;
   }
 
-  return result;
+  return { chunks: result, reachedImageData: false };
 }
 
 export async function readPngMetadata(filePath: string): Promise<Map<string, string>> {
@@ -43,18 +51,19 @@ export async function readPngMetadata(filePath: string): Promise<Map<string, str
     const initialSize = 65536;
     const buf = Buffer.alloc(initialSize);
     const { bytesRead } = await fd.read(buf, 0, initialSize, 0);
-    const result = readPngTextChunks(buf.subarray(0, bytesRead));
+    const { chunks, reachedImageData } = scanPngTextChunks(buf.subarray(0, bytesRead));
 
-    // If we read the full buffer and found no IDAT, metadata may be truncated.
-    // Re-read with a larger buffer (up to 2MB) to capture large ComfyUI workflows.
-    if (bytesRead === initialSize && result.size === 0) {
-      const largeSize = 2 * 1024 * 1024;
+    // If we read the full buffer and didn't reach IDAT, metadata may be truncated
+    // (e.g. `prompt` fits in 64KB but a large `workflow` chunk does not).
+    // Re-read with a larger buffer (up to 8MB) to capture large ComfyUI workflows.
+    if (bytesRead === initialSize && !reachedImageData) {
+      const largeSize = 8 * 1024 * 1024;
       const largeBuf = Buffer.alloc(largeSize);
       const { bytesRead: largeRead } = await fd.read(largeBuf, 0, largeSize, 0);
       return readPngTextChunks(largeBuf.subarray(0, largeRead));
     }
 
-    return result;
+    return chunks;
   } finally {
     await fd.close();
   }
