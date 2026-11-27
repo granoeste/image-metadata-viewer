@@ -129,7 +129,11 @@ ${commonStyles()}
         ? `<button class="export-btn" data-export="workflow" title="ComfyUI にドラッグ＆ドロップで読み込める UI 形式の workflow JSON を保存">Export Workflow (.json)</button>`
         : ""
     }
-    <button class="export-btn${metadata.rawWorkflow ? " secondary" : ""}" data-export="api" title="ComfyUI API 形式 (prompt) の JSON を保存。ComfyUI に読み込み、または /prompt API で実行可能">Export API Prompt (.json)</button>
+    ${
+      metadata.rawPrompt
+        ? `<button class="export-btn${metadata.rawWorkflow ? " secondary" : ""}" data-export="api" title="ComfyUI API 形式 (prompt) の JSON を保存。ComfyUI に読み込み、または /prompt API で実行可能">Export API Prompt (.json)</button>`
+        : ""
+    }
   </div>
   ${
     metadata.rawWorkflow

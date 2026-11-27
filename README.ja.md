@@ -48,6 +48,8 @@ npm run package
 - **エディタタイトルボタン**: 画像ファイルを開き、エディタタイトルバーのメタデータボタンをクリックします。
 - **自動連動**: メタデータパネルが開いている状態でタブを切り替えると、自動的に表示内容が更新されます。
 
+ComfyUI のワークフローを JSON で保存するには、メタデータパネルの **Export** ボタンを使うか、エクスプローラーで PNG を右クリックして **Export ComfyUI Workflow** を選択します。UI 形式の workflow（`.workflow.json`）と API 形式の prompt（`.api.json`）は、どちらも ComfyUI にドラッグ＆ドロップで読み込めます。
+
 ## 対応フォーマット
 
 ### PNG — Stable Diffusion（A1111）
@@ -67,9 +69,11 @@ PNG の tEXt チャンクから `prompt` / `workflow` キーを読み取り、�
 
 | セクション | 内容 |
 |-----------|------|
-| Positive Prompt | ノードグラフから抽出 |
-| Negative Prompt | ノードグラフから抽出 |
-| Generation Settings | 抽出されたパラメータテーブル |
+| Export | workflow（UI 形式）/ API prompt を JSON で保存 |
+| Positive Prompt | サンプラーからリンクをたどって抽出（条件分岐・プリミティブ・文字列操作・独自エンコーダ対応） |
+| Negative Prompt | サンプラーからリンクをたどって抽出 |
+| Generation Settings | 抽出されたパラメータテーブル（画像サイズは見つからなければ PNG 自体のサイズ） |
+| Workflow Nodes | 全ノードを依存順に表示（パラメータ + 入力リンク） |
 | Raw Prompt JSON | 折りたたみ式 JSON（コピーボタン付き） |
 | Raw Workflow JSON | 折りたたみ式 JSON（コピーボタン付き） |
 

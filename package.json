@@ -2,7 +2,7 @@
   "name": "image-metadata-viewer",
   "displayName": "Image Metadata Viewer",
   "description": "View Stable Diffusion / ComfyUI metadata (PNG) and EXIF data (JPEG) for image files",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "publisher": "granoeste",
   "engines": {
     "vscode": "^1.85.0"

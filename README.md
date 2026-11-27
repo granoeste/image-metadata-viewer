@@ -46,6 +46,8 @@ There are three ways to view image metadata:
 - **Editor title button**: Open an image file and click the metadata button in the editor title bar.
 - **Auto-sync**: Once the metadata panel is open, it automatically updates when you switch between image files.
 
+To save a ComfyUI workflow as JSON, use the **Export** buttons in the metadata panel, or right-click a PNG in the Explorer and select **Export ComfyUI Workflow**. Both the UI-format workflow (`.workflow.json`) and the API-format prompt (`.api.json`) can be loaded into ComfyUI by drag & drop.
+
 ## Supported Formats
 
 ### PNG — Stable Diffusion (A1111)
@@ -65,9 +67,11 @@ Reads `prompt` and `workflow` keys from PNG tEXt chunks and extracts node graph 
 
 | Section | Details |
 |---------|---------|
-| Positive Prompt | Extracted from node graph |
-| Negative Prompt | Extracted from node graph |
-| Generation Settings | Extracted parameters table |
+| Export | Save the workflow (UI format) / API prompt as JSON |
+| Positive Prompt | Traced from the sampler through linked nodes (switches, primitives, string ops, custom encoders) |
+| Negative Prompt | Traced from the sampler through linked nodes |
+| Generation Settings | Extracted parameters table (image size falls back to the PNG dimensions) |
+| Workflow Nodes | Every node in dependency order with parameters and input links |
 | Raw Prompt JSON | Collapsible JSON with copy button |
 | Raw Workflow JSON | Collapsible JSON with copy button |
 

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { readPngMetadata } from './pngReader';
+import { readPngMetadata, readPngSize } from './pngReader';
 import { parseSDParameters } from './metadataParser';
 import { parseComfyUIPrompt } from './comfyuiParser';
 import { readExifData } from './exifReader';
@@ -113,7 +113,8 @@ async function updatePanel(uri: vscode.Uri): Promise<void> {
       const comfyPrompt = chunks.get('prompt') || '';
       const comfyWorkflow = chunks.get('workflow') || '';
       if (comfyPrompt || comfyWorkflow) {
-        const metadata = parseComfyUIPrompt(comfyPrompt, comfyWorkflow);
+        const imageSize = await readPngSize(uri.fsPath).catch(() => undefined);
+        const metadata = parseComfyUIPrompt(comfyPrompt, comfyWorkflow, imageSize);
         currentComfyUI = { uri, rawPrompt: comfyPrompt, rawWorkflow: comfyWorkflow };
         currentPanel.title = `ComfyUI: ${fileName.length > 40 ? fileName.substring(0, 37) + '...' : fileName}`;
         currentPanel.webview.html = getComfyUIWebviewContent(currentPanel.webview, uri, metadata);

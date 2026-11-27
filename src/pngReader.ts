@@ -68,3 +68,28 @@ export async function readPngMetadata(filePath: string): Promise<Map<string, str
     await fd.close();
   }
 }
+
+/**
+ * PNG の IHDR チャンクから画像サイズを読み取る。
+ */
+export function readPngSizeFromBuffer(buffer: Buffer): { width: number; height: number } | undefined {
+  // signature (8) + length (4) + "IHDR" (4) + width (4) + height (4)
+  if (buffer.length < 24 || buffer.subarray(0, 8).compare(PNG_SIGNATURE) !== 0) {
+    return undefined;
+  }
+  if (buffer.toString('ascii', 12, 16) !== 'IHDR') {
+    return undefined;
+  }
+  return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+}
+
+export async function readPngSize(filePath: string): Promise<{ width: number; height: number } | undefined> {
+  const fd = await fs.promises.open(filePath, 'r');
+  try {
+    const buf = Buffer.alloc(24);
+    const { bytesRead } = await fd.read(buf, 0, 24, 0);
+    return readPngSizeFromBuffer(buf.subarray(0, bytesRead));
+  } finally {
+    await fd.close();
+  }
+}

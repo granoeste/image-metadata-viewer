@@ -3,7 +3,7 @@
 ## Overview
 
 VS Code拡張機能。画像ファイルのメタデータ（SD / ComfyUI / EXIF）をサイドパネルに表示する。
-旧名: `sd-metadata-viewer`。現在のバージョン: **1.0.0** / VS Code `^1.85.0` 必須。
+旧名: `sd-metadata-viewer`。現在のバージョン: **1.2.0** / VS Code `^1.85.0` 必須。
 
 ## Project Structure
 
@@ -13,7 +13,7 @@ src/
 ├── webviewContent.ts   # Webview HTML 生成 (SD / ComfyUI / EXIF / No metadata)
 ├── metadataParser.ts   # SD メタデータ文字列パース (A1111 形式)
 ├── comfyuiParser.ts    # ComfyUI ノードグラフ JSON パース (プロンプト・設定抽出)
-├── pngReader.ts        # PNG バイナリ解析 (tEXt チャンク読み取り)
+├── pngReader.ts        # PNG バイナリ解析 (tEXt チャンク読み取り, IHDR 画像サイズ)
 └── exifReader.ts       # JPEG EXIF バイナリ解析 (IFD0/ExifSubIFD/GPS タグ)
 out/                    # コンパイル済みJS + sourcemap
 *.vsix                  # パッケージ済みリリース

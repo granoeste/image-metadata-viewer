@@ -50,136 +50,233 @@ function findNodesContaining(prompt: ComfyUIPrompt, substring: string): [string,
   );
 }
 
+const SAMPLER_TYPES = ['KSampler', 'KSamplerAdvanced', 'SamplerCustom', 'SamplerCustomAdvanced'];
+
+/** テキストを保持する入力名（優先順） */
+const TEXT_INPUT_KEYS = ['text', 'prompt', 'value', 'string', 'text_g', 'text_l', 't5xxl', 'clip_l'];
+
+/** 値をそのまま下流へ渡す（パススルー）系ノードの入力名 */
+const PASSTHROUGH_INPUT_KEYS = ['source', 'input', 'any', 'anything', 'value', 'text', 'string'];
+
+/** 探索の深さ上限（循環・異常に深いグラフ対策） */
+const MAX_DEPTH = 32;
+
+function isLinkRef(value: any): value is [string | number, number] {
+  return Array.isArray(value) && value.length === 2
+    && (typeof value[0] === 'string' || typeof value[0] === 'number')
+    && typeof value[1] === 'number';
+}
+
 /**
- * Resolve a ComfyUI input reference. If the value is a string, return it directly.
- * If it's a link [nodeId, outputIndex], try to resolve the text from the linked node.
+ * Boolean 入力を解決する（直接値、または PrimitiveBoolean などへのリンク）。
  */
-function resolveTextInput(prompt: ComfyUIPrompt, value: any): string | undefined {
-  if (typeof value === 'string') {
-    return value;
+function resolveBoolean(prompt: ComfyUIPrompt, value: any, depth = 0): boolean | undefined {
+  if (typeof value === 'boolean') { return value; }
+  if (!isLinkRef(value) || depth > MAX_DEPTH) { return undefined; }
+  const node = prompt[String(value[0])];
+  if (!node) { return undefined; }
+  for (const key of ['value', 'boolean']) {
+    const v = resolveBoolean(prompt, node.inputs?.[key], depth + 1);
+    if (v !== undefined) { return v; }
   }
   return undefined;
 }
 
 /**
- * Extract positive prompt text from CLIPTextEncode nodes.
- * Tries to identify which is positive vs negative by tracing connections to the sampler.
+ * 数値入力を解決する（直接値、または PrimitiveInt などへのリンク）。
  */
-function extractPrompts(prompt: ComfyUIPrompt): { positive: string; negative: string } {
-  // Find sampler node to trace positive/negative connections
-  const samplerTypes = ['KSampler', 'KSamplerAdvanced', 'SamplerCustom', 'SamplerCustomAdvanced'];
-  let samplerNode: ComfyUINode | undefined;
-
-  for (const type of samplerTypes) {
-    const nodes = findNodes(prompt, type);
-    if (nodes.length > 0) {
-      samplerNode = nodes[0][1];
-      break;
-    }
+function resolveNumber(prompt: ComfyUIPrompt, value: any, depth = 0): number | undefined {
+  if (typeof value === 'number') { return value; }
+  if (!isLinkRef(value) || depth > MAX_DEPTH) { return undefined; }
+  const node = prompt[String(value[0])];
+  if (!node) { return undefined; }
+  for (const key of ['value', 'int', 'float', 'number']) {
+    const v = resolveNumber(prompt, node.inputs?.[key], depth + 1);
+    if (v !== undefined) { return v; }
   }
-
-  let positiveNodeId: string | undefined;
-  let negativeNodeId: string | undefined;
-
-  if (samplerNode) {
-    const posRef = samplerNode.inputs.positive;
-    const negRef = samplerNode.inputs.negative;
-    if (Array.isArray(posRef)) { positiveNodeId = String(posRef[0]); }
-    if (Array.isArray(negRef)) { negativeNodeId = String(negRef[0]); }
-  }
-
-  // Collect text from CLIP encode nodes
-  const clipEncodeNodes = findNodesContaining(prompt, 'CLIPTextEncode');
-  const texts: { id: string; text: string }[] = [];
-
-  for (const [id, node] of clipEncodeNodes) {
-    const text = resolveTextInput(prompt, node.inputs.text);
-    if (text) {
-      texts.push({ id, text: text.trim() });
-    }
-  }
-
-  // If we traced sampler connections, use them
-  if (positiveNodeId || negativeNodeId) {
-    // Positive might be connected through intermediate nodes (e.g. ConditioningCombine)
-    // Walk through to find actual text
-    const positive = findTextForConditioningChain(prompt, positiveNodeId, texts);
-    const negative = findTextForConditioningChain(prompt, negativeNodeId, texts);
-    return { positive, negative };
-  }
-
-  // Fallback: check for ConditioningZeroOut (often used for negative in Flux)
-  const zeroOutNodes = findNodes(prompt, 'ConditioningZeroOut');
-  const zeroOutInputIds = new Set<string>();
-  for (const [, node] of zeroOutNodes) {
-    const ref = node.inputs.conditioning;
-    if (Array.isArray(ref)) { zeroOutInputIds.add(String(ref[0])); }
-  }
-
-  // Texts not feeding into ConditioningZeroOut are likely positive
-  const positiveTexts = texts.filter(t => !zeroOutInputIds.has(t.id));
-  const negativeTexts = texts.filter(t => zeroOutInputIds.has(t.id));
-
-  return {
-    positive: positiveTexts.map(t => t.text).join('\n'),
-    negative: negativeTexts.map(t => t.text).join('\n'),
-  };
+  return undefined;
 }
 
 /**
- * Walk the conditioning chain from a node ID to find text content.
+ * テキスト入力を解決する。文字列ならそのまま、リンクならリンク先ノードをたどって文字列を求める。
+ * - 条件分岐 (switch / on_true / on_false) は Boolean を評価して実際に使われた側のみたどる
+ * - StringReplace / StringConcatenate は結果を計算する
+ * - 解決できない場合（LLM 生成テキスト等）は undefined
+ */
+function resolveText(prompt: ComfyUIPrompt, value: any, depth = 0): string | undefined {
+  if (typeof value === 'string') { return value; }
+  if (!isLinkRef(value) || depth > MAX_DEPTH) { return undefined; }
+  const node = prompt[String(value[0])];
+  if (!node || !node.inputs) { return undefined; }
+  const inputs = node.inputs;
+  const next = (v: any) => resolveText(prompt, v, depth + 1);
+
+  // 条件分岐ノード (ComfySwitchNode 等)
+  if ('on_true' in inputs || 'on_false' in inputs) {
+    const cond = resolveBoolean(prompt, inputs.switch ?? inputs.boolean ?? inputs.condition);
+    if (cond !== undefined) {
+      return next(cond ? inputs.on_true : inputs.on_false);
+    }
+    return next(inputs.on_true) ?? next(inputs.on_false);
+  }
+
+  // 文字列置換
+  if ('find' in inputs && 'replace' in inputs && 'string' in inputs) {
+    const str = next(inputs.string);
+    const find = next(inputs.find);
+    const replace = next(inputs.replace);
+    if (str !== undefined && find !== undefined && replace !== undefined) {
+      return find === '' ? str : str.split(find).join(replace);
+    }
+    return str;
+  }
+
+  // 文字列連結
+  if ('string_a' in inputs && 'string_b' in inputs) {
+    const a = next(inputs.string_a);
+    const b = next(inputs.string_b);
+    if (a === undefined && b === undefined) { return undefined; }
+    const delimiter = typeof inputs.delimiter === 'string' ? inputs.delimiter : '';
+    return [a, b].filter((t): t is string => t !== undefined).join(delimiter);
+  }
+
+  // テキスト系入力 → パススルー系入力の順に探す
+  for (const key of [...TEXT_INPUT_KEYS, ...PASSTHROUGH_INPUT_KEYS]) {
+    if (key in inputs) {
+      const text = next(inputs[key]);
+      if (text !== undefined) { return text; }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * コンディショニングノードからプロンプトテキストを求める。
+ * CLIPTextEncode 以外のエンコーダ（TextEncodeQwenImageEdit, MiniMaxH3ImageConditioning 等）や、
+ * 中間ノード（ConditioningCombine, ControlNetApply 等）にも対応する。
  */
 function findTextForConditioningChain(
   prompt: ComfyUIPrompt,
   nodeId: string | undefined,
-  clipTexts: { id: string; text: string }[]
+  depth = 0,
+  slot = 0,
 ): string {
-  if (!nodeId) { return ''; }
-
-  // Direct match: the node itself is a CLIPTextEncode
-  const directMatch = clipTexts.find(t => t.id === nodeId);
-  if (directMatch) { return directMatch.text; }
-
-  // The node might be an intermediate (ConditioningZeroOut, ConditioningCombine, etc.)
+  if (!nodeId || depth > MAX_DEPTH) { return ''; }
   const node = prompt[nodeId];
-  if (!node) { return ''; }
+  if (!node || !node.inputs) { return ''; }
 
-  // Check if it's a zero-out node (empty negative)
+  // ゼロアウト（空のネガティブ）
   if (node.class_type === 'ConditioningZeroOut') { return ''; }
 
-  // For ConditioningCombine, collect texts from both inputs
-  if (node.class_type === 'ConditioningCombine') {
-    const texts: string[] = [];
-    for (const key of ['conditioning_1', 'conditioning_2']) {
-      const ref = node.inputs[key];
-      if (Array.isArray(ref)) {
-        const text = findTextForConditioningChain(prompt, String(ref[0]), clipTexts);
-        if (text) { texts.push(text); }
-      }
-    }
-    return texts.join('\n');
+  const inputs = node.inputs;
+  const walk = (ref: any) =>
+    isLinkRef(ref) ? findTextForConditioningChain(prompt, String(ref[0]), depth + 1, ref[1]) : '';
+
+  // positive / negative を両方受けて両方出力するノード（ControlNetApplyAdvanced 等）は
+  // 出力スロット 0 = positive, 1 = negative として対応する側をたどる
+  if (isLinkRef(inputs.positive) && isLinkRef(inputs.negative)) {
+    return walk(slot === 1 ? inputs.negative : inputs.positive);
   }
 
-  // Generic: check any input that references a known text node
-  for (const value of Object.values(node.inputs)) {
-    if (Array.isArray(value)) {
-      const text = findTextForConditioningChain(prompt, String(value[0]), clipTexts);
+  // 複数コンディショニングの結合
+  const condKeys = Object.keys(inputs).filter(k => /^conditioning_/.test(k) || k === 'conditioning_to' || k === 'conditioning_from');
+  if (condKeys.length >= 2) {
+    return condKeys.map(k => walk(inputs[k])).filter(Boolean).join('\n');
+  }
+
+  // エンコーダ: テキスト系入力を持つノード
+  const texts: string[] = [];
+  for (const key of TEXT_INPUT_KEYS) {
+    if (key in inputs) {
+      const text = resolveText(prompt, inputs[key]);
+      if (text !== undefined && text.trim() && !texts.includes(text.trim())) {
+        texts.push(text.trim());
+      }
+    }
+  }
+  if (texts.length > 0) { return texts.join('\n'); }
+
+  // 中間ノード: コンディショニング系入力をたどる
+  for (const [key, value] of Object.entries(inputs)) {
+    if (/conditioning|^positive$|^negative$|^cond/.test(key)) {
+      const text = walk(value);
       if (text) { return text; }
     }
   }
-
   return '';
+}
+
+/**
+ * サンプラー（または Guider）の positive / negative 入力のノード ID を求める。
+ */
+function findSamplerConditioning(
+  prompt: ComfyUIPrompt,
+): { positiveId?: string; negativeId?: string; positiveSlot: number; negativeSlot: number } {
+  for (const type of SAMPLER_TYPES) {
+    const nodes = findNodes(prompt, type);
+    if (nodes.length === 0) { continue; }
+    let inputs = nodes[0][1].inputs || {};
+    // SamplerCustomAdvanced → guider (CFGGuider / BasicGuider)
+    if (!('positive' in inputs) && isLinkRef(inputs.guider)) {
+      inputs = prompt[String(inputs.guider[0])]?.inputs || {};
+    }
+    const pos = inputs.positive ?? inputs.conditioning;
+    const neg = inputs.negative;
+    return {
+      positiveId: isLinkRef(pos) ? String(pos[0]) : undefined,
+      negativeId: isLinkRef(neg) ? String(neg[0]) : undefined,
+      positiveSlot: isLinkRef(pos) ? pos[1] : 0,
+      negativeSlot: isLinkRef(neg) ? neg[1] : 0,
+    };
+  }
+  return { positiveSlot: 0, negativeSlot: 0 };
+}
+
+/**
+ * Positive / Negative プロンプトを抽出する。
+ * サンプラーの接続をたどって判定し、たどれない場合は CLIPTextEncode 系ノードから推定する。
+ */
+function extractPrompts(prompt: ComfyUIPrompt): { positive: string; negative: string } {
+  const { positiveId, negativeId, positiveSlot, negativeSlot } = findSamplerConditioning(prompt);
+  if (positiveId || negativeId) {
+    const positive = findTextForConditioningChain(prompt, positiveId, 0, positiveSlot);
+    const negative = findTextForConditioningChain(prompt, negativeId, 0, negativeSlot);
+    if (positive || negative) {
+      return { positive, negative };
+    }
+  }
+
+  // Fallback: CLIPTextEncode 系ノードのテキスト
+  const texts: { id: string; text: string }[] = [];
+  for (const [id, node] of findNodesContaining(prompt, 'TextEncode')) {
+    const text = findTextForConditioningChain(prompt, id);
+    if (text) { texts.push({ id, text }); }
+  }
+
+  // ConditioningZeroOut に入るものはネガティブ扱い（Flux 等）
+  const zeroOutInputIds = new Set<string>();
+  for (const [, node] of findNodes(prompt, 'ConditioningZeroOut')) {
+    const ref = node.inputs?.conditioning;
+    if (isLinkRef(ref)) { zeroOutInputIds.add(String(ref[0])); }
+  }
+
+  return {
+    positive: texts.filter(t => !zeroOutInputIds.has(t.id)).map(t => t.text).join('\n'),
+    negative: texts.filter(t => zeroOutInputIds.has(t.id)).map(t => t.text).join('\n'),
+  };
 }
 
 /**
  * Extract generation settings from the sampler and related nodes.
  */
-function extractSettings(prompt: ComfyUIPrompt): Record<string, string> {
+function extractSettings(
+  prompt: ComfyUIPrompt,
+  imageSize?: { width: number; height: number },
+): Record<string, string> {
   const settings: Record<string, string> = {};
 
   // Sampler settings
-  const samplerTypes = ['KSampler', 'KSamplerAdvanced', 'SamplerCustom', 'SamplerCustomAdvanced'];
-  for (const type of samplerTypes) {
+  for (const type of SAMPLER_TYPES) {
     const nodes = findNodes(prompt, type);
     if (nodes.length > 0) {
       const inputs = nodes[0][1].inputs;
@@ -193,19 +290,26 @@ function extractSettings(prompt: ComfyUIPrompt): Record<string, string> {
     }
   }
 
-  // Image dimensions
-  const latentTypes = ['EmptyLatentImage', 'EmptySD3LatentImage'];
-  for (const type of latentTypes) {
-    const nodes = findNodes(prompt, type);
-    if (nodes.length > 0) {
-      const inputs = nodes[0][1].inputs;
-      if (inputs.width !== undefined) { settings['Width'] = String(inputs.width); }
-      if (inputs.height !== undefined) { settings['Height'] = String(inputs.height); }
-      if (inputs.batch_size !== undefined && inputs.batch_size > 1) {
-        settings['Batch Size'] = String(inputs.batch_size);
-      }
-      break;
+  // Image dimensions: Empty*Latent* ノード（EmptyLatentImage, EmptySD3LatentImage 等）
+  const latentNodes = Object.values(prompt).filter(node =>
+    typeof node.class_type === 'string' && /^Empty.*Latent/.test(node.class_type)
+  );
+  for (const node of latentNodes) {
+    const width = resolveNumber(prompt, node.inputs?.width);
+    const height = resolveNumber(prompt, node.inputs?.height);
+    if (width === undefined || height === undefined) { continue; }
+    settings['Width'] = String(width);
+    settings['Height'] = String(height);
+    const batch = resolveNumber(prompt, node.inputs?.batch_size);
+    if (batch !== undefined && batch > 1) {
+      settings['Batch Size'] = String(batch);
     }
+    break;
+  }
+  // 画像編集など潜在画像ノードがない場合は、画像ファイル自体のサイズを使う
+  if (!settings['Width'] && imageSize) {
+    settings['Width'] = String(imageSize.width);
+    settings['Height'] = String(imageSize.height);
   }
 
   // Model / Checkpoint
@@ -344,7 +448,14 @@ export function analyzeComfyUINodes(prompt: ComfyUIPrompt, rawWorkflow: string =
   });
 }
 
-export function parseComfyUIPrompt(rawPrompt: string, rawWorkflow: string = ''): ComfyUIMetadata {
+/**
+ * @param imageSize 画像ファイル自体のサイズ（グラフからサイズが求まらない場合に使う）
+ */
+export function parseComfyUIPrompt(
+  rawPrompt: string,
+  rawWorkflow: string = '',
+  imageSize?: { width: number; height: number },
+): ComfyUIMetadata {
   let prompt: ComfyUIPrompt;
   try {
     prompt = JSON.parse(rawPrompt);
@@ -353,7 +464,9 @@ export function parseComfyUIPrompt(rawPrompt: string, rawWorkflow: string = ''):
     return {
       positivePrompt: '',
       negativePrompt: '',
-      settings: {},
+      settings: imageSize
+        ? { Width: String(imageSize.width), Height: String(imageSize.height) }
+        : {},
       rawPrompt,
       rawWorkflow,
       nodes: [],
@@ -361,7 +474,7 @@ export function parseComfyUIPrompt(rawPrompt: string, rawWorkflow: string = ''):
   }
 
   const { positive, negative } = extractPrompts(prompt);
-  const settings = extractSettings(prompt);
+  const settings = extractSettings(prompt, imageSize);
   const nodes = analyzeComfyUINodes(prompt, rawWorkflow);
 
   return {
